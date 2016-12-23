@@ -371,7 +371,7 @@ TEXT runtime·tstart_stdcall(SB),NOSPLIT,$0
 	CLD
 
 	CALL	runtime·stackcheck(SB)	// clobbers AX,CX
-	CALL	runtime·mstart(SB)
+	CALL	runtime·mstart(SB)  //调用mstart，创建线程
 
 	XORL	AX, AX			// return 0 == success
 	RET

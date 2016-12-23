@@ -329,9 +329,9 @@ type g struct {
 	atomicstatus   uint32
 	stackLock      uint32 // sigprof/scang lock; TODO: fold in to atomicstatus
 	goid           int64
-	waitsince      int64  // approx time when the g become blocked
-	waitreason     string // if status==Gwaiting
-	schedlink      guintptr
+	waitsince      int64    // approx time when the g become blocked
+	waitreason     string   // if status==Gwaiting
+	schedlink      guintptr //在sched里，gorountine通过schedlink形成链表
 	preempt        bool     // preemption signal, duplicates stackguard0 = stackpreempt
 	paniconfault   bool     // panic (instead of crash) on unexpected fault address
 	preemptscan    bool     // preempted g does scan for gc
@@ -476,7 +476,7 @@ type p struct {
 	runnext guintptr
 
 	// Available G's (status == Gdead)
-	gfree    *g
+	gfree    *g //空闲gorountine列表
 	gfreecnt int32
 
 	sudogcache []*sudog
@@ -526,15 +526,15 @@ type schedt struct {
 	npidle     uint32
 	nmspinning uint32 // See "Worker thread parking/unparking" comment in proc.go.
 
-	// Global runnable queue.
+	// Global runnable queue. 全局可运行的gorountine链表
 	runqhead guintptr
 	runqtail guintptr
 	runqsize int32
 
 	// Global cache of dead G's.
 	gflock       mutex
-	gfreeStack   *g
-	gfreeNoStack *g
+	gfreeStack   *g //带有stack的空闲gorountine
+	gfreeNoStack *g //没有stack的空闲gorountine
 	ngfree       int32
 
 	// Central cache of sudog structs.
@@ -707,13 +707,13 @@ const _TracebackMaxFrames = 100
 var (
 	emptystring string
 	allglen     uintptr
-	allm        *m
-	allp        [_MaxGomaxprocs + 1]*p
+	allm        *m                     //所有线程列表
+	allp        [_MaxGomaxprocs + 1]*p //processor数组
 	gomaxprocs  int32
 	panicking   uint32
 	ncpu        int32
 	forcegc     forcegcstate
-	sched       schedt
+	sched       schedt //全局调度器
 	newprocs    int32
 
 	// Information about what cpu features are available.

@@ -424,7 +424,7 @@ const (
 //	call runtime·mstart
 //
 // The new G calls runtime·main.
-func schedinit() {
+func schedinit() { //在TEXT runtime·rt0_go(SB)调用
 	// raceinit must be the first call to race detector.
 	// In particular, it must be done before mallocinit below calls racemapshadow.
 	_g_ := getg()
@@ -449,20 +449,20 @@ func schedinit() {
 	goargs()
 	goenvs()
 	parsedebugvars()
-	gcinit()
+	gcinit() //GC初始化
 
 	sched.lastpoll = uint64(nanotime())
 	procs := int(ncpu)
-	if procs > _MaxGomaxprocs {
+	if procs > _MaxGomaxprocs { //最多256个线程并行运行 _MaxGomaxprocs= 1<<8
 		procs = _MaxGomaxprocs
 	}
-	if n := atoi(gogetenv("GOMAXPROCS")); n > 0 {
+	if n := atoi(gogetenv("GOMAXPROCS")); n > 0 { //看用户设置的GOMAXPROC，如果不超过256，就用该数值，否则用256
 		if n > _MaxGomaxprocs {
 			n = _MaxGomaxprocs
 		}
 		procs = n
 	}
-	if procresize(int32(procs)) != nil {
+	if procresize(int32(procs)) != nil { //初始化procs个线程运行环境p
 		throw("unknown runnable goroutine during bootstrap")
 	}
 
@@ -1660,7 +1660,7 @@ func startm(_p_ *p, spinning bool) {
 // Hands off P from syscall or locked M.
 // Always runs without a P, so write barriers are not allowed.
 //go:nowritebarrier
-func handoffp(_p_ *p) {
+func handoffp(_p_ *p) { //一个线程阻塞了，将小推车交给另外一个线程
 	// handoffp must start an M in any situation where
 	// findrunnable would return a G to run on _p_.
 
@@ -2705,7 +2705,7 @@ func malg(stacksize int32) *g {
 // are available sequentially after &fn; they would not be
 // copied if a stack split occurred.
 //go:nosplit
-func newproc(siz int32, fn *funcval) {
+func newproc(siz int32, fn *funcval) { //创建一个gorountine运行函数fn
 	argp := add(unsafe.Pointer(&fn), sys.PtrSize)
 	pc := getcallerpc(unsafe.Pointer(&siz))
 	systemstack(func() {
@@ -2737,9 +2737,9 @@ func newproc1(fn *funcval, argp *uint8, narg int32, nret int32, callerpc uintptr
 	}
 
 	_p_ := _g_.m.p.ptr()
-	newg := gfget(_p_)
-	if newg == nil {
-		newg = malg(_StackMin)
+	newg := gfget(_p_) //试图从_p_上或者sched上获取一个空闲的gorountine
+	if newg == nil {   //没有的话新创建一个
+		newg = malg(_StackMin) //2048
 		casgstatus(newg, _Gidle, _Gdead)
 		newg.gcRescan = -1
 		allgadd(newg) // publishes with a g->status of Gdead so GC scanner doesn't look at uninitialized stack.
@@ -2771,7 +2771,7 @@ func newproc1(fn *funcval, argp *uint8, narg int32, nret int32, callerpc uintptr
 	newg.sched.g = guintptr(unsafe.Pointer(newg))
 	gostartcallfn(&newg.sched, fn)
 	newg.gopc = callerpc
-	newg.startpc = fn.fn
+	newg.startpc = fn.fn //设置gorountine的运行函数
 	if isSystemGoroutine(newg) {
 		atomic.Xadd(&sched.ngsys, +1)
 	}
@@ -2818,7 +2818,7 @@ func newproc1(fn *funcval, argp *uint8, narg int32, nret int32, callerpc uintptr
 
 // Put on gfree list.
 // If local list is too long, transfer a batch to the global list.
-func gfput(_p_ *p, gp *g) {
+func gfput(_p_ *p, gp *g) { //只有goruntine退出的时候才会调用该函数回收
 	if readgstatus(gp) != _Gdead {
 		throw("gfput: bad status (not Gdead)")
 	}
@@ -2839,10 +2839,10 @@ func gfput(_p_ *p, gp *g) {
 		gp.stkbarPos = 0
 	}
 
-	gp.schedlink.set(_p_.gfree)
+	gp.schedlink.set(_p_.gfree) //将gorountine放回_p_的gfree链表
 	_p_.gfree = gp
 	_p_.gfreecnt++
-	if _p_.gfreecnt >= 64 {
+	if _p_.gfreecnt >= 64 { //超过64个，只留32个在本地，其余的放到全局的sched的gfreeNoStack或者gfreeStack链表上
 		lock(&sched.gflock)
 		for _p_.gfreecnt >= 32 {
 			_p_.gfreecnt--
@@ -2872,23 +2872,23 @@ retry:
 			if sched.gfreeStack != nil {
 				// Prefer Gs with stacks.
 				gp = sched.gfreeStack
-				sched.gfreeStack = gp.schedlink.ptr()
+				sched.gfreeStack = gp.schedlink.ptr() //将gp从sched的gfreeStack上取下来
 			} else if sched.gfreeNoStack != nil {
 				gp = sched.gfreeNoStack
-				sched.gfreeNoStack = gp.schedlink.ptr()
+				sched.gfreeNoStack = gp.schedlink.ptr() //将gp从sched的gfreeNoStack上取下来
 			} else {
 				break
 			}
 			_p_.gfreecnt++
 			sched.ngfree--
-			gp.schedlink.set(_p_.gfree)
+			gp.schedlink.set(_p_.gfree) //将gp加到processor的gfree链表上
 			_p_.gfree = gp
 		}
 		unlock(&sched.gflock)
 		goto retry
 	}
 	if gp != nil {
-		_p_.gfree = gp.schedlink.ptr()
+		_p_.gfree = gp.schedlink.ptr() //从_p_的gfree链表上取下一个空闲的gorountine gp
 		_p_.gfreecnt--
 		if gp.stack.lo == 0 {
 			// Stack was deallocated in gfput. Allocate a new one.
@@ -3387,7 +3387,7 @@ func procresize(nprocs int32) *p {
 	}
 
 	_g_ := getg()
-	if _g_.m.p != 0 && _g_.m.p.ptr().id < nprocs {
+	if _g_.m.p != 0 && _g_.m.p.ptr().id < nprocs { //如果运行当前gorountine的上下文结构体在范围内，可以继续使用，否则释放当前的，用新分配的
 		// continue to use the current P
 		_g_.m.p.ptr().status = _Prunning
 	} else {
@@ -3412,9 +3412,9 @@ func procresize(nprocs int32) *p {
 			continue
 		}
 		p.status = _Pidle
-		if runqempty(p) {
+		if runqempty(p) { //p上没有可运行的gorountine，将p放入全局的idle列表sched.pidle
 			pidleput(p)
-		} else {
+		} else { //将p加到可运行p链表里
 			p.m.set(mget())
 			p.link.set(runnablePs)
 			runnablePs = p
@@ -3963,10 +3963,10 @@ func globrunqget(_p_ *p, max int32) *g {
 		sched.runqtail = 0
 	}
 
-	gp := sched.runqhead.ptr()
+	gp := sched.runqhead.ptr() //第一个gorountine通过返回值返回
 	sched.runqhead = gp.schedlink
 	n--
-	for ; n > 0; n-- {
+	for ; n > 0; n-- { //其余n-1个放到_p_的runq上
 		gp1 := sched.runqhead.ptr()
 		sched.runqhead = gp1.schedlink
 		runqput(_p_, gp1, false)
@@ -3978,7 +3978,7 @@ func globrunqget(_p_ *p, max int32) *g {
 // Sched must be locked.
 // May run during STW, so write barriers are not allowed.
 //go:nowritebarrier
-func pidleput(_p_ *p) {
+func pidleput(_p_ *p) { //将p加到全局的idle p的list上
 	if !runqempty(_p_) {
 		throw("pidleput: P has non-empty run queue")
 	}
